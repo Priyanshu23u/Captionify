@@ -1,4 +1,4 @@
-# 🖼️ AI Image Caption Generator
+# 🖼️ Captionify : AI Image Caption Generator
 
 ## 📌 Overview
 The AI Image Caption Generator is a deep learning-based application that generates descriptive captions for images. It utilizes a combination of **computer vision** and **natural language processing (NLP)** techniques to analyze an image and create relevant text descriptions.
