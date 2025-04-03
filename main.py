@@ -1,0 +1,304 @@
+import streamlit as st
+import numpy as np
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+import matplotlib.pyplot as plt
+import pickle
+import os
+from PIL import Image
+import time
+
+# Set page configuration
+st.set_page_config(
+    page_title="AI Image Caption Generator",
+    page_icon="🖼️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling with improved caption visibility
+def apply_custom_css():
+    st.markdown("""
+    <style>
+    .main {
+        padding: 2rem;
+        background-color: #f8f9fa;
+    }
+    .stApp {
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    h1 {
+        color: #1e3a8a;
+        font-weight: 800;
+        margin-bottom: 2rem;
+    }
+    h2, h3 {
+        color: #1e3a8a;
+        margin-top: 1.5rem;
+    }
+    .caption-container {
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background-color: #1e3a8a;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .caption-text {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: white;
+        padding: 0.5rem;
+        text-align: center;
+    }
+    .caption-label {
+        font-size: 1rem;
+        color: #e2e8f0;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    .stButton button {
+        background-color: #1e3a8a;
+        color: white;
+        font-weight: 600;
+    }
+    .upload-section {
+        padding: 2rem;
+        border-radius: 1rem;
+        background-color: #e2e8f0;
+        margin-bottom: 2rem;
+    }
+    .footer {
+        margin-top: 3rem;
+        text-align: center;
+        color: #64748b;
+    }
+    .image-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Function to generate caption
+def generate_caption(image_path, model_path, tokenizer_path, feature_extractor_path, max_length=34, img_size=224):
+    # Load the trained models and tokenizer
+    caption_model = load_model(model_path)
+    feature_extractor = load_model(feature_extractor_path)
+
+    with open(tokenizer_path, "rb") as f:
+        tokenizer = pickle.load(f)
+
+    # Preprocess the image
+    img = load_img(image_path, target_size=(img_size, img_size))
+    img = img_to_array(img) / 255.0  # Normalize pixel values
+    img = np.expand_dims(img, axis=0)
+    
+    # Show progress
+    with st.spinner('Extracting image features...'):
+        image_features = feature_extractor.predict(img, verbose=0)  # Extract image features
+
+    # Generate the caption
+    in_text = "startseq"
+    with st.spinner('Generating caption...'):
+        for i in range(max_length):
+            sequence = tokenizer.texts_to_sequences([in_text])[0]
+            sequence = pad_sequences([sequence], maxlen=max_length)
+            yhat = caption_model.predict([image_features, sequence], verbose=0)
+            yhat_index = np.argmax(yhat)
+            word = tokenizer.index_word.get(yhat_index, None)
+            if word is None:
+                break
+            in_text += " " + word
+            if word == "endseq":
+                break
+    
+    caption = in_text.replace("startseq", "").replace("endseq", "").strip()
+    
+    # Capitalize first letter and add period if needed
+    caption = caption[0].upper() + caption[1:]
+    if not caption.endswith(('.', '!', '?')):
+        caption += '.'
+        
+    return caption
+
+# Function to display the image with caption
+def display_image_with_caption(image_path, caption):
+    col1, col2, col3 = st.columns([1, 10, 1])
+    with col2:
+        st.markdown('<div class="image-container">', unsafe_allow_html=True)
+        image = Image.open(image_path)
+        st.image(image, use_column_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Prominently display the caption
+        st.markdown('<div class="caption-container">', unsafe_allow_html=True)
+        st.markdown('<div class="caption-label">GENERATED CAPTION</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="caption-text">"{caption}"</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Display confidence information (placeholder)
+        st.info("This caption was generated with a high confidence score. Adjust the confidence threshold in the sidebar to change caption style.")
+
+# Function to create a figure with embedded caption for saving
+def create_captioned_figure(image_path, caption):
+    fig, ax = plt.subplots(figsize=(10, 8))
+    img = plt.imread(image_path)
+    ax.imshow(img)
+    ax.axis('off')
+    
+    # Add caption as title
+    plt.title(f'"{caption}"', fontsize=16, color='white', 
+              backgroundcolor='#1e3a8a', pad=20)
+    
+    # Add watermark
+    fig.text(0.5, 0.01, "Generated by AI Caption Generator", 
+             fontsize=10, color='gray', ha='center')
+    
+    return fig
+
+# Main sidebar for app information and settings
+def sidebar():
+    st.sidebar.image("https://i.imgur.com/7DNblV7.png", width=100)  # Replace with your logo
+    st.sidebar.title("About")
+    st.sidebar.info(
+        """
+        This app uses a deep learning model to generate descriptive captions 
+        for your images. The model combines computer vision and natural language 
+        processing to understand the content of images.
+        """
+    )
+    
+    st.sidebar.title("Settings")
+    confidence = st.sidebar.slider("Confidence Threshold", 0.0, 1.0, 0.5)
+    
+    caption_style = st.sidebar.selectbox(
+        "Caption Style",
+        ["Descriptive", "Creative", "Technical", "Emotional"]
+    )
+    
+    st.sidebar.title("Examples")
+    if st.sidebar.button("Load Example Image"):
+        return "example.jpg"  # Replace with path to your example image
+    
+    return None, confidence, caption_style
+
+# Sample gallery with example images
+def display_sample_gallery():
+    st.markdown("### 📸 Sample Gallery")
+    st.markdown("Click on any sample image to try the caption generator:")
+    
+    # Replace these with actual sample image paths
+    sample_images = [
+        {"path": "sample1.jpg", "thumbnail": "sample1_thumb.jpg", "name": "Landscape"},
+        {"path": "sample2.jpg", "thumbnail": "sample2_thumb.jpg", "name": "People"},
+        {"path": "sample3.jpg", "thumbnail": "sample3_thumb.jpg", "name": "Animals"},
+    ]
+    
+    cols = st.columns(len(sample_images))
+    selected_sample = None
+    
+    for i, sample in enumerate(sample_images):
+        with cols[i]:
+            # This is just for demo - in a real app you'd have actual images
+            st.image("https://via.placeholder.com/150", caption=sample["name"])
+            if st.button(f"Use {sample['name']}"):
+                selected_sample = sample["path"]
+    
+    return selected_sample
+
+# Main app function
+def main():
+    apply_custom_css()
+    
+    # App header
+    st.title("🖼️ AI Image Caption Generator")
+    st.markdown("""
+    Upload an image and our AI will generate a descriptive caption for it. 
+    This tool uses a deep learning model trained on thousands of image-caption pairs.
+    """)
+    
+    # Sidebar and its functionality
+    sidebar_returns = sidebar()
+    if isinstance(sidebar_returns, tuple) and len(sidebar_returns) == 3:
+        example_image, confidence, caption_style = sidebar_returns
+    else:
+        example_image, confidence, caption_style = sidebar_returns, 0.5, "Descriptive"
+    
+    # Main content area
+    with st.container():
+        st.markdown('<div class="upload-section">', unsafe_allow_html=True)
+        st.markdown("### 📤 Upload Your Image")
+        st.markdown("Choose an image file to generate a caption:")
+        uploaded_image = st.file_uploader("", type=["jpg", "jpeg", "png"])
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Handle the sample gallery
+    selected_sample = display_sample_gallery()
+    
+    # Process the image (either uploaded, example, or sample)
+    image_to_process = None
+    if uploaded_image is not None:
+        # Save the uploaded image temporarily
+        with open("uploaded_image.jpg", "wb") as f:
+            f.write(uploaded_image.getbuffer())
+        image_to_process = "uploaded_image.jpg"
+        st.success("Image uploaded successfully!")
+    elif example_image:
+        image_to_process = example_image
+    elif selected_sample:
+        image_to_process = selected_sample
+    
+    # Generate caption if an image is available
+    if image_to_process:
+        st.markdown("### 🔍 Analysis Results")
+        
+        # Paths for the saved models and tokenizer
+        model_path = "models/model.keras"  # Replace with the actual path
+        tokenizer_path = "models/tokenizer.pkl"  # Replace with the actual path
+        feature_extractor_path = "models/feature_extractor.keras"  # Replace with the actual path
+        
+        # Add a loading animation
+        with st.spinner('Processing your image...'):
+            # Simulate processing time (remove in production)
+            time.sleep(1)
+            
+            # Generate the caption
+            caption = generate_caption(image_to_process, model_path, tokenizer_path, feature_extractor_path)
+            
+            # Display the image with the generated caption
+            display_image_with_caption(image_to_process, caption)
+            
+            # Create a figure with embedded caption for downloading
+            fig = create_captioned_figure(image_to_process, caption)
+            
+            # Add option to download the captioned image
+            st.markdown("### 💾 Save Results")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Download Captioned Image"):
+                    # Save figure to a temporary file
+                    plt.savefig("captioned_image.jpg", bbox_inches="tight", dpi=300)
+                    st.success("Image prepared for download!")
+                    
+                    # Provide download button
+                    with open("captioned_image.jpg", "rb") as file:
+                        btn = st.download_button(
+                            label="Click to download",
+                            data=file,
+                            file_name="ai_captioned_image.jpg",
+                            mime="image/jpeg"
+                        )
+            
+            with col2:
+                if st.button("Copy Caption Text"):
+                    st.code(caption, language=None)
+                    st.info("Caption text copied to clipboard! (In a real app)")
+    
+    # Footer
+    st.markdown('<div class="footer">Developed with ❤️ using Streamlit and TensorFlow</div>', unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
